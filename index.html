@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador Neuroquímico v9.0 (Independiente)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Chart.js y adaptador de fecha (con versiones compatibles) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'accent': '#3b82f6',
+                        'base-100': '#111827',
+                        'base-200': '#1f2937',
+                        'base-300': '#374151',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .modal-backdrop { transition: opacity 0.3s ease; }
+        .modal-content { transition: transform 0.3s ease; }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 24px;
+            height: 24px;
+            background: #3b82f6;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 24px;
+            height: 24px;
+            background: #3b82f6;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        .gemini-spinner {
+            border: 4px solid rgba(255, 255, 255, 0.2);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        [data-tooltip] { position: relative; }
+        [data-tooltip]::after {
+            content: attr(data-tooltip);
+            position: absolute; bottom: 100%; left: 50%;
+            transform: translateX(-50%) translateY(-8px);
+            background-color: #374151; color: #fff;
+            padding: 8px 12px; border-radius: 8px;
+            font-size: 0.875rem; line-height: 1.25rem;
+            white-space: pre-line; width: 280px; text-align: left;
+            pointer-events: none; opacity: 0;
+            transition: opacity 0.2s, transform 0.2s; z-index: 10;
+        }
+        [data-tooltip]:hover::after { opacity: 1; transform: translateX(-50%) translateY(0); }
+        #gemini-response { max-height: 20rem; overflow-y: auto; padding-right: 0.5rem; }
+    </style>
+</head>
+<body class="bg-base-100 text-gray-200 antialiased">
+
+    <div id="app" class="container mx-auto p-4 md:p-6 max-w-4xl">
+
+        <div id="profile-setup" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+            <div class="bg-base-200 rounded-2xl shadow-2xl p-8 w-full max-w-md">
+                <h2 class="text-3xl font-bold text-white mb-2">Configura tu Perfil</h2>
+                <p class="text-gray-400 mb-6">Tus datos se guardarán en este navegador.</p>
+                <form id="profile-form">
+                    <div class="mb-4">
+                        <label for="sexo" class="block text-gray-300 mb-2 font-semibold">Sexo Biológico</label>
+                        <select id="sexo" class="w-full bg-base-300 border border-gray-600 rounded-lg px-4 py-3 text-white" required>
+                            <option value="Hombre">Hombre</option>
+                            <option value="Mujer">Mujer</option>
+                        </select>
+                    </div>
+                    <div class="mb-6">
+                        <label for="peso" class="block text-gray-300 mb-2 font-semibold">Peso Corporal (kg)</label>
+                        <input type="number" id="peso" step="0.1" min="1" class="w-full bg-base-300 rounded-lg px-4 py-3 text-white" placeholder="Ej: 75" required>
+                    </div>
+                    <button type="submit" class="w-full bg-accent hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg">Guardar Perfil</button>
+                </form>
+            </div>
+        </div>
+
+        <div id="event-modal" class="fixed inset-0 z-40 items-center justify-center p-4 hidden modal-backdrop bg-black bg-opacity-75">
+            <div class="bg-base-200 rounded-2xl shadow-2xl p-8 w-full max-w-md modal-content transform scale-95">
+                <h2 id="event-modal-title" class="text-3xl font-bold text-white mb-6"></h2>
+                <form id="event-form">
+                    <div id="event-inputs-container" class="space-y-4 mb-6"></div>
+                    <div class="flex gap-4">
+                        <button type="button" id="cancel-event-btn" class="w-full bg-base-300 hover:bg-gray-600 text-gray-300 font-bold py-3">Cancelar</button>
+                        <button type="submit" class="w-full bg-accent hover:bg-blue-500 text-white font-bold py-3">Añadir</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <div id="gemini-modal" class="fixed inset-0 z-40 items-center justify-center p-4 hidden modal-backdrop bg-black bg-opacity-75">
+            <div class="bg-base-200 rounded-2xl shadow-2xl p-8 w-full max-w-md modal-content transform scale-95">
+                <h2 class="text-3xl font-bold text-white mb-6">Análisis IA</h2>
+                <div id="gemini-loading" class="flex flex-col items-center justify-center h-40">
+                    <div class="gemini-spinner"></div>
+                    <p class="mt-4 text-gray-400">Analizando tu estado...</p>
+                </div>
+                <div id="gemini-response" class="text-gray-300 prose prose-invert max-w-none hidden"></div>
+                <button type="button" id="close-gemini-btn" class="w-full mt-6 bg-base-300 hover:bg-gray-600 text-gray-300 font-bold py-3">Cerrar</button>
+            </div>
+        </div>
+
+        <div id="main-app" class="hidden">
+            <header class="flex justify-between items-center mb-6">
+                <h1 class="text-4xl font-extrabold text-white">Neuro-Índice</h1>
+                <button id="edit-profile-btn" class="bg-base-200 hover:bg-base-300 text-gray-300 font-semibold py-2 px-4 rounded-lg">Perfil</button>
+            </header>
+
+            <div class="bg-base-200 p-8 rounded-2xl shadow-xl mb-6 text-center">
+                 <div class="flex justify-center items-baseline gap-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-400 mb-2">Índice Actual</h3>
+                        <div id="current-index" class="text-8xl font-black text-white">100</div>
+                    </div>
+                    <div>
+                         <h3 class="text-base font-semibold text-gray-400 mb-2">Línea Base</h3>
+                         <div id="base-level-display" class="text-4xl font-bold text-accent">100</div>
+                    </div>
+                </div>
+                 <div id="sleep-debt-indicator" class="text-red-400 font-semibold mt-2 hidden"></div>
+            </div>
+
+            <div class="bg-base-200 p-4 md:p-6 rounded-2xl shadow-xl mb-6 h-96">
+                <h3 class="text-2xl font-bold text-white mb-4">Evolución y Previsión</h3>
+                <canvas id="neuro-chart"></canvas>
+            </div>
+
+            <div class="bg-base-200 p-6 rounded-2xl shadow-xl mb-6">
+                <h3 class="text-2xl font-bold text-white mb-4">Análisis IA</h3>
+                <p class="text-gray-400 mb-4">Obtén una interpretación de tu estado actual y una recomendación con la IA de Gemini.</p>
+                <button id="analyze-gemini-btn" class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold py-3 rounded-lg">
+                    ✨ Analizar mi Estado
+                </button>
+            </div>
+
+            <div class="bg-base-200 p-6 rounded-2xl shadow-xl mb-6">
+                <h3 class="text-2xl font-bold text-white mb-4">¿Cómo te sientes ahora?</h3>
+                <div class="flex items-center gap-4">
+                     <span class="text-lg">😩</span>
+                     <input type="range" id="sensacion-slider" min="1" max="10" value="5" class="w-full h-3 bg-base-300 rounded-lg appearance-none">
+                     <span class="text-lg">😄</span>
+                </div>
+                 <div class="text-center mt-2">
+                    <span id="sensacion-value" class="font-bold text-accent text-lg">5</span> / 10
+                 </div>
+                <button id="add-sensacion-btn" class="w-full mt-4 bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 rounded-lg">Registrar Sensación</button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-base-200 p-6 rounded-2xl shadow-xl">
+                    <h3 class="text-2xl font-bold text-white mb-4">Añadir Evento</h3>
+                    <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                        <button data-event="sueño" class="event-btn bg-indigo-600 hover:bg-indigo-700 col-span-1 lg:col-span-3" data-tooltip="Efecto: (+/-) según horas (>4h) y calidad.&#x000A;Duración: 24h.&#x000A;Bono por 8h buenas: +12.">Sueño</button>
+                        <button data-event="hrv" class="event-btn bg-cyan-600 hover:bg-cyan-700" data-tooltip="Efecto: Modificador temporal según valor.&#x000A;Duración: 3h.&#x000A;Ej: 80ms = +7.5.">HRV</button>
+                        <button data-event="ejercicio" class="event-btn bg-emerald-500 hover:bg-emerald-600" data-tooltip="Efecto: Pico positivo según intensidad.&#x000A;Duración: Sesión + 2h.&#x000A;Ej: 30min medio = +10.">Ejercicio</button>
+                        <button data-event="alcohol" class="event-btn bg-purple-600 hover:bg-purple-700" data-tooltip="Efecto: Pico +8/ud, Bajón -16/ud.&#x000A;Duración: 6h.&#x000A;Ajustado por sexo y peso.">Alcohol</button>
+                        <button data-event="modafinilo" class="event-btn bg-sky-500 hover:bg-sky-600" data-tooltip="Efecto: +35 por 100mg.&#x000A;Duración: ~17h.&#x000A;Ajustado por sexo y peso.">Modafinilo</button>
+                        <button data-event="cafeina" class="event-btn bg-yellow-700 hover:bg-yellow-800" data-tooltip="Efecto: Pico +20/taza, Bajón -5/taza.&#x000A;Duración: 4h.">Cafeína</button>
+                        <button data-event="te" class="event-btn bg-lime-600 hover:bg-lime-700" data-tooltip="Efecto: Pico +12/taza, Bajón -2/taza.&#x000A;Duración: 5h.">Té</button>
+                        <button data-event="azucar" class="event-btn bg-gray-400 hover:bg-gray-500" data-tooltip="Efecto: Pico +25, Bajón -15 (medio).&#x000A;Duración: 2h.">Azúcar</button>
+                        <button data-event="porno" class="event-btn bg-orange-500 hover:bg-orange-600" data-tooltip="Efecto: Pico variable, Bajón -10.&#x000A;Duración: Sesión + 1.5h.">Porno</button>
+                        <button data-event="masturbacion" class="event-btn bg-pink-500 hover:bg-pink-600" data-tooltip="Efecto: Pico +15, Bajón -5.&#x000A;Duración: Sesión + 50min.">Masturbación</button>
+                        <button data-event="orgasmo" class="event-btn bg-rose-600 hover:bg-rose-700" data-tooltip="Efecto: Pico +40 (3min), Bajón -20.&#x000A;Duración: 2.5h.">Orgasmo</button>
+                    </div>
+                </div>
+
+                <div class="bg-base-200 p-6 rounded-2xl shadow-xl">
+                    <h3 class="text-2xl font-bold text-white mb-4">Eventos Activos</h3>
+                    <div id="active-events" class="space-y-3 max-h-60 overflow-y-auto">
+                        <p id="no-events-msg" class="text-gray-400">Sin eventos activos.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const App = {
+                state: { userProfile: null, events: [], currentIndex: 100, currentEventType: null, chart: null },
+                ui: {},
+                
+                init() {
+                    this.ui = {
+                        profileSetup: document.getElementById('profile-setup'), mainApp: document.getElementById('main-app'), profileForm: document.getElementById('profile-form'),
+                        sexoInput: document.getElementById('sexo'), pesoInput: document.getElementById('peso'), editProfileBtn: document.getElementById('edit-profile-btn'),
+                        currentIndexDisplay: document.getElementById('current-index'), baseLevelDisplay: document.getElementById('base-level-display'), chartCanvas: document.getElementById('neuro-chart'),
+                        sleepDebtIndicator: document.getElementById('sleep-debt-indicator'),
+                        activeEventsContainer: document.getElementById('active-events'), noEventsMsg: document.getElementById('no-events-msg'),
+                        eventModal: document.getElementById('event-modal'), eventModalTitle: document.getElementById('event-modal-title'), eventForm: document.getElementById('event-form'),
+                        eventInputsContainer: document.getElementById('event-inputs-container'), cancelEventBtn: document.getElementById('cancel-event-btn'),
+                        sensacionSlider: document.getElementById('sensacion-slider'), sensacionValue: document.getElementById('sensacion-value'),
+                        addSensacionBtn: document.getElementById('add-sensacion-btn'),
+                        analyzeGeminiBtn: document.getElementById('analyze-gemini-btn'),
+                        geminiModal: document.getElementById('gemini-modal'),
+                        geminiLoading: document.getElementById('gemini-loading'),
+                        geminiResponse: document.getElementById('gemini-response'),
+                        closeGeminiBtn: document.getElementById('close-gemini-btn'),
+                    };
+                    
+                    document.querySelectorAll('.event-btn').forEach(btn => {
+                        btn.className += ' text-white font-bold py-3 px-4 rounded-lg transition duration-300';
+                    });
+
+                    this.attachEventListeners();
+                    this.loadProfile();
+
+                    if (this.state.userProfile) {
+                        this.startApp();
+                    } else {
+                        this.ui.profileSetup.classList.remove('hidden');
+                    }
+                },
+                
+                startApp() {
+                    this.ui.profileSetup.classList.add('hidden');
+                    this.ui.mainApp.classList.remove('hidden');
+                    this.loadEvents();
+                    this.checkAndApplyRecovery();
+                    this.initChart();
+                    this.update();
+                    setInterval(() => this.update(), 60000); 
+                },
+
+                loadProfile() {
+                    try {
+                        const profile = localStorage.getItem('neuroSimProfile_v9');
+                        if (profile) {
+                            const parsedProfile = JSON.parse(profile);
+                            if (parsedProfile && parsedProfile.sexo && parsedProfile.peso) {
+                                this.state.userProfile = {
+                                    ...parsedProfile,
+                                    dynamicBaseLevel: parsedProfile.dynamicBaseLevel || 100,
+                                    lastPenalizingEventTimestamp: parsedProfile.lastPenalizingEventTimestamp || null,
+                                    lastRecoveryTimestamp: parsedProfile.lastRecoveryTimestamp || null
+                                };
+                                this.ui.sexoInput.value = this.state.userProfile.sexo;
+                                this.ui.pesoInput.value = this.state.userProfile.peso;
+                            } else { this.state.userProfile = null; }
+                        }
+                    } catch (e) {
+                        console.error("Error al cargar perfil:", e);
+                        this.state.userProfile = null;
+                    }
+                },
+                
+                saveProfile(e) {
+                    e.preventDefault();
+                    const pesoValue = parseFloat(this.ui.pesoInput.value);
+                    if (pesoValue <= 0) return;
+
+                    const wasFirstTime = !this.state.userProfile;
+                    const userProfileData = {
+                        sexo: this.ui.sexoInput.value,
+                        peso: pesoValue,
+                        dynamicBaseLevel: wasFirstTime ? 100 : this.state.userProfile.dynamicBaseLevel,
+                        lastPenalizingEventTimestamp: wasFirstTime ? null : this.state.userProfile.lastPenalizingEventTimestamp,
+                        lastRecoveryTimestamp: wasFirstTime ? null : this.state.userProfile.lastRecoveryTimestamp,
+                    };
+                    this.state.userProfile = userProfileData;
+                    localStorage.setItem('neuroSimProfile_v9', JSON.stringify(userProfileData));
+
+                    if (wasFirstTime) { this.startApp(); } 
+                    else {
+                        this.ui.profileSetup.classList.add('hidden');
+                        this.update();
+                    }
+                },
+                
+                loadEvents() {
+                    try {
+                        const events = localStorage.getItem('neuroSimEvents_v9');
+                        this.state.events = events ? JSON.parse(events) : [];
+                    } catch (e) {
+                        console.error("Error al cargar eventos:", e);
+                        this.state.events = [];
+                    }
+                },
+
+                saveEvents() {
+                    localStorage.setItem('neuroSimEvents_v9', JSON.stringify(this.state.events));
+                },
+
+                addEvent(type, params = {}, startTime = new Date()) {
+                    this.state.events.push({ id: Date.now(), type, params, startTime: startTime.toISOString() });
+                    this.saveEvents();
+
+                    const penalizingEvents = { porno: 0.1, orgasmo: 0.05, alcohol: 0.08, azucar: 0.03 };
+                    if (penalizingEvents[type]) {
+                        this.state.userProfile.dynamicBaseLevel -= penalizingEvents[type];
+                        this.state.userProfile.lastPenalizingEventTimestamp = new Date().toISOString();
+                        localStorage.setItem('neuroSimProfile_v9', JSON.stringify(this.state.userProfile));
+                    }
+                    this.update();
+                },
+
+                checkAndApplyRecovery() {
+                    if (!this.state.userProfile || !this.state.userProfile.lastPenalizingEventTimestamp) return;
+
+                    const lastPenaltyTime = new Date(this.state.userProfile.lastPenalizingEventTimestamp).getTime();
+                    const now = Date.now();
+                    const hoursSincePenalty = (now - lastPenaltyTime) / 3600000;
+
+                    if (hoursSincePenalty > 72) {
+                        const lastRecoveryTime = this.state.userProfile.lastRecoveryTimestamp ? new Date(this.state.userProfile.lastRecoveryTimestamp).getTime() : lastPenaltyTime;
+                        const hoursSinceLastRecovery = (now - lastRecoveryTime) / 3600000;
+                        
+                        if (hoursSinceLastRecovery >= 24) {
+                            const daysToRecover = Math.floor(hoursSinceLastRecovery / 24);
+                            const recoveryAmount = daysToRecover * 0.2;
+                            
+                            let newBaseLevel = this.state.userProfile.dynamicBaseLevel + recoveryAmount;
+                            newBaseLevel = Math.min(newBaseLevel, 100);
+
+                            this.state.userProfile.dynamicBaseLevel = newBaseLevel;
+                            this.state.userProfile.lastRecoveryTimestamp = new Date().toISOString();
+                            localStorage.setItem('neuroSimProfile_v9', JSON.stringify(this.state.userProfile));
+                        }
+                    }
+                },
+                
+                handleEventSubmit(e) {
+                    e.preventDefault();
+                    const params = {};
+                    ['cantidad', 'intensidad'].forEach(p => {
+                        const input = document.getElementById(`param-${p}`);
+                        if (input) params[p] = (input.type === 'number') ? parseFloat(input.value) : input.value;
+                    });
+                    const dateValue = document.getElementById('param-date').value;
+                    const timeValue = document.getElementById('param-time').value;
+                    const eventStartTime = new Date(`${dateValue}T${timeValue}`);
+                    this.addEvent(this.state.currentEventType, params, eventStartTime);
+                    this.closeEventModal();
+                },
+                
+                calculateSleepDebt(now) {
+                    const sleepEvents = this.state.events
+                        .filter(e => e.type === 'sueño')
+                        .sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+
+                    if (sleepEvents.length === 0) {
+                        if (this.state.events.length > 0) {
+                             const firstEventTime = this.state.events.sort((a,b) => new Date(a.startTime) - new Date(b.startTime))[0].startTime;
+                             const hoursSinceFirstEvent = (now - new Date(firstEventTime).getTime()) / 3600000;
+                             if (hoursSinceFirstEvent > 24) return -((hoursSinceFirstEvent - 24) * 2);
+                        }
+                        return 0; 
+                    }
+
+                    const lastSleep = sleepEvents[0];
+                    const lastSleepStart = new Date(lastSleep.startTime).getTime();
+                    const lastSleepDurationHours = lastSleep.params.cantidad || 0;
+                    const lastSleepEnd = lastSleepStart + (lastSleepDurationHours * 3600000);
+
+                    const hoursSinceSleepEnd = (now - lastSleepEnd) / 3600000;
+                    
+                    if (hoursSinceSleepEnd > 16) {
+                        const deprivationHours = Math.floor(hoursSinceSleepEnd - 16);
+                        const penalty = deprivationHours * 2;
+                        return -penalty;
+                    }
+                    return 0;
+                },
+
+                update() {
+                    try {
+                        if (!this.state.userProfile) return;
+                        const factors = this.calculateFactors();
+                        let totalEffectNow = 0;
+                        const now = Date.now();
+                        
+                        this.state.events.forEach(event => {
+                            const effectResult = this.getEventEffect(event, factors, now);
+                            totalEffectNow += effectResult.effect;
+                        });
+
+                        const sleepDebt = this.calculateSleepDebt(now);
+                        totalEffectNow += sleepDebt;
+                        
+                        const displayEvents = this.state.events.filter(event => !this.getEventEffect(event, factors, now).finished);
+                        
+                        this.state.currentIndex = Math.round(this.state.userProfile.dynamicBaseLevel + totalEffectNow);
+                        this.updateUI(displayEvents, sleepDebt);
+                        this.updateChart();
+                    } catch (error) {
+                        console.error("Update cycle error:", error);
+                    }
+                },
+
+                updateUI(displayEvents, sleepDebt) {
+                    this.ui.currentIndexDisplay.textContent = this.state.currentIndex;
+                    this.ui.baseLevelDisplay.textContent = this.state.userProfile.dynamicBaseLevel.toFixed(2);
+                    
+                    if (sleepDebt < 0) {
+                        this.ui.sleepDebtIndicator.textContent = `Deuda de Sueño: ${sleepDebt} pts`;
+                        this.ui.sleepDebtIndicator.classList.remove('hidden');
+                    } else {
+                        this.ui.sleepDebtIndicator.classList.add('hidden');
+                    }
+
+                    const base = this.state.userProfile.dynamicBaseLevel;
+                    if (this.state.currentIndex > base + 15) this.ui.currentIndexDisplay.style.color = '#22c55e';
+                    else if (this.state.currentIndex > base + 5) this.ui.currentIndexDisplay.style.color = '#a3e635';
+                    else if (this.state.currentIndex < base - 15) this.ui.currentIndexDisplay.style.color = '#ef4444';
+                    else if (this.state.currentIndex < base - 5) this.ui.currentIndexDisplay.style.color = '#f97316';
+                    else this.ui.currentIndexDisplay.style.color = '#ffffff';
+
+                    this.ui.activeEventsContainer.innerHTML = '';
+                    if (displayEvents.length === 0) {
+                        this.ui.activeEventsContainer.innerHTML = '<p class="text-gray-400">Sin eventos activos.</p>';
+                    } else {
+                        displayEvents.sort((a,b) => new Date(b.startTime) - new Date(a.startTime)).forEach(event => {
+                            const eventEl = document.createElement('div');
+                            eventEl.className = 'bg-base-300 p-3 rounded-lg flex justify-between items-center';
+                            let details = '';
+                            if (event.params.cantidad) {
+                                let unit = '';
+                                if (['modafinilo'].includes(event.type)) unit = 'mg';
+                                else if (['ejercicio', 'porno', 'masturbacion'].includes(event.type)) unit = 'min';
+                                else if (event.type === 'alcohol') unit = 'uds';
+                                else if (event.type === 'sueño') unit = 'h';
+                                else if (event.type === 'hrv') unit = 'ms';
+                                else if (['cafeina', 'te'].includes(event.type)) unit = 'tazas';
+                                details += `${details ? ': ' : ''}${event.params.cantidad} ${unit}`;
+                            }
+                            if (event.params.intensidad) {
+                                const qualityMap = {0.5:'Mala', 1.0:'Regular', 1.5:'Buena'};
+                                const intensityMap = {0.5:'Baja', 0.7:'Baja', 1.0:'Media', 1.5:'Alta', 2.0:'Alta'};
+                                const text = qualityMap[event.params.intensidad] || intensityMap[event.params.intensidad] || '';
+                                details += ` (${text})`;
+                            }
+                            const timeSince = (Date.now() - new Date(event.startTime).getTime()) / 60000;
+                            const timeString = timeSince < 60 ? `${Math.round(timeSince)}m` : `${(timeSince/60).toFixed(1)}h`;
+                            eventEl.innerHTML = `<div><span class="font-bold capitalize">${(event.type || '').replace('cafeina', 'Cafeína')}</span><span class="text-sm text-gray-400 ml-2">${details}</span></div> <span class="text-sm font-mono text-gray-400">hace ${timeString}</span>`;
+                            this.ui.activeEventsContainer.appendChild(eventEl);
+                        });
+                    }
+                },
+
+                async handleGeminiAnalysis() {
+                    this.ui.geminiModal.classList.add("flex");
+                    this.ui.geminiModal.classList.remove("hidden");
+                    this.ui.geminiResponse.classList.add("hidden");
+                    this.ui.geminiLoading.classList.remove("hidden");
+                    const response = await this.callGeminiAPI();
+                    this.ui.geminiLoading.classList.add("hidden");
+                    this.ui.geminiResponse.classList.remove("hidden");
+                    this.ui.geminiResponse.textContent = response;
+                },
+
+                async callGeminiAPI() {
+                    const systemPrompt = "Eres un asistente experto en neuroquímica y bienestar. Tu tono es informativo, científico pero accesible y empático. No eres un médico, sino un intérprete de un modelo teórico. Explicas el estado actual y el impacto a largo plazo en la línea base.";
+                    const now = Date.now();
+                    const factors = this.calculateFactors();
+                    const activeEvents = this.state.events.filter(event => !this.getEventEffect(event, factors, now).finished);
+                    let eventsSummary = activeEvents.length > 0 ? activeEvents.map(event => `- Evento: ${event.type}, iniciado hace ${((now - new Date(event.startTime).getTime()) / 3600000).toFixed(1)} horas.`).join('\n') : "No hay eventos activos.";
+                    const userQuery = `Mi perfil fisiológico es: Sexo ${this.state.userProfile.sexo}, Peso ${this.state.userProfile.peso} kg. Mi estado actual es: - Neuro-Índice Actual: ${this.state.currentIndex} - Línea Base Dinámica: ${this.state.userProfile.dynamicBaseLevel.toFixed(2)}. Contexto importante: La Línea Base (homeostasis) ideal es 100. Mi línea base actual se ha ajustado por hábitos a largo plazo. El Índice Actual es la suma de la Línea Base y los efectos temporales de los eventos. Un Índice de ${this.state.currentIndex} sobre una base de ${this.state.userProfile.dynamicBaseLevel.toFixed(2)} significa un estado temporal de ${ (this.state.currentIndex - this.state.userProfile.dynamicBaseLevel).toFixed(0) } puntos. Eventos activos que influyen en el índice: ${eventsSummary}. Basado en estos datos, proporciona un análisis en dos párrafos: 1. **Análisis del Momento:** Explica mi estado actual (el Neuro-Índice de ${this.state.currentIndex}) como resultado de los eventos activos y su efecto sobre mi línea base. 2. **Análisis a Largo Plazo:** Comenta sobre mi Línea Base de ${this.state.userProfile.dynamicBaseLevel.toFixed(2)}. Explica si está por debajo de 100, por qué podría ser, y da una sugerencia práctica y específica para ayudar a recuperarla hacia 100. No uses markdown.`;
+                    const apiKey = "";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                    const payload = { contents: [{ parts: [{ text: userQuery }] }], systemInstruction: { parts: [{ text: systemPrompt }] }, };
+                    try {
+                        let response;
+                        for (let i = 0; i < 5; i++) {
+                            response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                            if (response.ok) break;
+                            await new Promise(resolve => setTimeout(resolve, 2**i * 1000));
+                        }
+                        if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+                        const result = await response.json();
+                        return result.candidates?.[0]?.content?.parts?.[0]?.text || "No se pudo obtener una respuesta de la IA.";
+                    } catch (error) {
+                        console.error("Error calling Gemini API:", error);
+                        return "Error al conectar con el servicio de IA.";
+                    }
+                },
+                
+                initChart() {
+                    const ctx = this.ui.chartCanvas.getContext('2d');
+                    this.state.chart = new Chart(ctx, {
+                        type: 'line', data: { datasets: [{ label: 'Historial', data: [], borderColor: '#3b82f6', borderWidth: 3, pointRadius: 0, tension: 0.4 }, { label: 'Previsión', data: [], borderColor: '#60a5fa', borderWidth: 2, pointRadius: 0, tension: 0.4, borderDash: [5, 5] }] },
+                        options: { parsing: false, responsive: true, maintainAspectRatio: false, scales: { x: { type: 'time', time: { unit: 'day', displayFormats: { day: 'dd MMM' }, tooltipFormat: 'dd MMM, HH:mm' }, grid: { color: '#374151' }, ticks: { color: '#9ca3af', source: 'auto' } }, y: { grid: { color: '#374151' }, ticks: { color: '#9ca3af' }, min: 0, max: 200 } }, plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } } }
+                    });
+                },
+                
+                openEventModal(t){this.state.currentEventType=t;const e=`<div class="grid grid-cols-2 gap-4"><div><label for="param-date" class="block text-gray-300 mb-1 font-semibold">Fecha</label><input type="date" id="param-date" class="w-full bg-base-300 rounded-lg px-4 py-3" required></div><div><label for="param-time" class="block text-gray-300 mb-1 font-semibold">Hora</label><input type="time" id="param-time" class="w-full bg-base-300 rounded-lg px-4 py-3" required></div></div>`,i={alcohol:{title:"Consumo de Alcohol",inputs:`<label class="font-semibold">Nº de Bebidas</label><input type="number" id="param-cantidad" value="1" min="1" class="w-full bg-base-300 rounded-lg px-4 py-3" required>${e}`},modafinilo:{title:"Dosis de Modafinilo",inputs:`<label class="font-semibold">Dosis (mg)</label><input type="number" id="param-cantidad" value="100" step="50" min="50" class="w-full bg-base-300 rounded-lg px-4 py-3" required>${e}`},ejercicio:{title:"Sesión de Ejercicio",inputs:`<label class="font-semibold">Duración (min)</label><input type="number" id="param-cantidad" value="30" step="10" min="10" class="w-full bg-base-300 rounded-lg px-4 py-3" required><label class="font-semibold">Intensidad</label><select id="param-intensidad" class="w-full bg-base-300 rounded-lg px-4 py-3"><option value="0.7">Baja</option><option value="1.0" selected>Media</option><option value="1.5">Alta</option></select>${e}`},porno:{title:"Consumo de Pornografía",inputs:`<label class="font-semibold">Duración (min)</label><input type="number" id="param-cantidad" value="15" step="5" min="5" class="w-full bg-base-300 rounded-lg px-4 py-3" required>${e}`},cafeina:{title:"Consumo de Cafeína",inputs:`<label class="font-semibold">Nº de Tazas</label><input type="number" id="param-cantidad" value="1" min="1" class="w-full bg-base-300 rounded-lg px-4 py-3" required>${e}`},te:{title:"Consumo de Té",inputs:`<label class="font-semibold">Nº de Tazas</label><input type="number" id="param-cantidad" value="1" min="1" class="w-full bg-base-300 rounded-lg px-4 py-3" required>${e}`},azucar:{title:"Consumo de Azúcar",inputs:`<label class="font-semibold">Intensidad</label><select id="param-intensidad" class="w-full bg-base-300 rounded-lg px-4 py-3"><option value="0.5">Baja</option><option value="1.0" selected>Media</option><option value="2.0">Alta</option></select>${e}`},sueño:{title:"Registro de Sueño",inputs:`<label class="font-semibold">Horas Dormidas</label><input type="number" id="param-cantidad" step="0.5" value="8" min="0" class="w-full bg-base-300 rounded-lg px-4 py-3" required><label class="font-semibold">Calidad del Sueño</label><select id="param-intensidad" class="w-full bg-base-300 rounded-lg px-4 py-3"><option value="0.5">Mala</option><option value="1.0" selected>Regular</option><option value="1.5">Buena</option></select>${e}`},hrv:{title:"Registro de HRV",inputs:`<label class="font-semibold">Valor HRV (ms)</label><input type="number" id="param-cantidad" value="55" min="10" class="w-full bg-base-300 rounded-lg px-4 py-3" required>${e}`},masturbacion:{title:"Sesión de Masturbación",inputs:`<label class="font-semibold">Duración (min)</label><input type="number" id="param-cantidad" value="10" step="5" min="5" class="w-full bg-base-300 rounded-lg px-4 py-3" required>${e}`},orgasmo:{title:"Registro de Orgasmo",inputs:e}};this.ui.eventModalTitle.textContent=i[t].title,this.ui.eventInputsContainer.innerHTML=i[t].inputs;const s=new Date;document.getElementById("param-date").valueAsDate=s,document.getElementById("param-time").value=s.toTimeString().slice(0,5),this.ui.eventModal.classList.add("flex"),this.ui.eventModal.classList.remove("hidden"),setTimeout(()=>this.ui.eventModal.querySelector(".modal-content").classList.remove("scale-95"),10)},
+                
+                closeEventModal(){this.ui.eventModal.querySelector(".modal-content").classList.add("scale-95"),setTimeout(()=>{this.ui.eventModal.classList.add("hidden"),this.ui.eventModal.classList.remove("flex")},300)},
+                
+                calculateFactors(){const{sexo:t,peso:e}=this.state.userProfile,i=Math.max(1,e);return{factorSexoAlcohol:"Mujer"===t?1.3:1,factorSexoModafiniloDuracionMultiplier:"Mujer"===t?1.2:1,factorPeso:75/i}},
+
+                getEventEffect(event, factors, now) {
+                    const startTime = new Date(event.startTime).getTime();
+                    const minutesElapsed = (now - startTime) / 60000;
+
+                    if (minutesElapsed < 0) return { effect: 0, finished: false };
+
+                    let effectValue = 0;
+                    let isFinished = false;
+
+                    const formulas = { alcohol: { duration: 360, apply: p => { const q = p.cantidad || 1, u = 8 * q * factors.factorSexoAlcohol * factors.factorPeso, d = -16 * q * factors.factorSexoAlcohol * factors.factorPeso; if (minutesElapsed < 60) return minutesElapsed / 60 * u; if (minutesElapsed < 180) return u + (minutesElapsed - 60) / 120 * (d - u); if (minutesElapsed < 360) return d * (1 - (minutesElapsed - 180) / 180); return 0; } }, modafinilo: { duration: 1020, apply: p => { const d = (p.cantidad || 100) / 100, pk = 35 * d * factors.factorPeso, pD = 660 * factors.factorSexoModafiniloDuracionMultiplier; if (minutesElapsed < 120) return minutesElapsed / 120 * pk; if (minutesElapsed < 120 + pD) return pk; if (minutesElapsed < 120 + pD + 240) return pk * (1 - (minutesElapsed - 120 - pD) / 240); return 0; } }, ejercicio: { duration: p => (p.cantidad || 30) + 120, apply: p => { const d = p.cantidad || 30, i = p.intensidad || 1, pk = 10 * i * factors.factorPeso, pD = Math.max(0, d - 15); if (minutesElapsed < 15) return minutesElapsed / 15 * pk; if (minutesElapsed < 15 + pD) return pk; if (minutesElapsed < 15 + pD + 120) return pk * (1 - (minutesElapsed - 15 - pD) / 120); return 0; } }, porno: { duration: p => (p.cantidad || 15) + 90, apply: p => { const d = p.cantidad || 15, u = 5 + d / 10, dn = -10; if (minutesElapsed < d) return minutesElapsed / d * u; if (minutesElapsed < d + 20) return u + (minutesElapsed - d) / 20 * (dn - u); if (minutesElapsed < d + 90) return dn * (1 - (minutesElapsed - d - 20) / 70); return 0; } }, cafeina: { duration: 240, apply: p => { const q = p.cantidad || 1, u = 20 * q, d = -5 * q; if (minutesElapsed < 30) return minutesElapsed / 30 * u; if (minutesElapsed < 90) return u + (minutesElapsed - 30) / 60 * (d - u); if (minutesElapsed < 240) return d * (1 - (minutesElapsed - 90) / 150); return 0; } }, te: { duration: 300, apply: p => { const q = p.cantidad || 1, u = 12 * q, d = -2 * q; if (minutesElapsed < 45) return minutesElapsed / 45 * u; if (minutesElapsed < 120) return u + (minutesElapsed - 45) / 75 * (d - u); if (minutesElapsed < 300) return d * (1 - (minutesElapsed - 120) / 180); return 0; } }, azucar: { duration: 120, apply: p => { const i = p.intensidad || 1, u = 25 * i, d = -15 * i; if (minutesElapsed < 15) return minutesElapsed / 15 * u; if (minutesElapsed < 45) return u + (minutesElapsed - 15) / 30 * (d - u); if (minutesElapsed < 120) return d * (1 - (minutesElapsed - 45) / 75); return 0; } }, sensacion: { duration: 60, apply: p => { const v = p.cantidad, pk = (v - 5) * 2.5; return minutesElapsed < 60 ? pk * (1 - minutesElapsed / 60) : 0; } }, sueño: { duration: 1440, apply: p => { const b = (p.cantidad - 4) * 2, t = b * (p.intensidad || 1); return minutesElapsed < 1440 ? t * (1 - minutesElapsed / 1440) : 0; } }, hrv: { duration: 180, apply: p => { const e = (p.cantidad - 55) * 0.3; return minutesElapsed < 180 ? e * (1 - minutesElapsed / 180) : 0; } }, masturbacion: { duration: p => (p.cantidad || 10) + 50, apply: p => { const d = p.cantidad || 10, u = 15, dn = -5; if (minutesElapsed < d) return minutesElapsed / d * u; if (minutesElapsed < d + 50) return u + (minutesElapsed - d) / 50 * (dn - u); return 0; } }, orgasmo: { duration: 150, apply: () => { const u = 40, d = -20; if (minutesElapsed < 3) return u; if (minutesElapsed < 15) return d; if (minutesElapsed < 150) return d * (1 - (minutesElapsed - 15) / 135); return 0; } } };
+
+                    const formula = formulas[event.type];
+                    if (formula) {
+                        const totalDuration = typeof formula.duration === 'function' ? formula.duration(event.params) : formula.duration;
+                        if (minutesElapsed > totalDuration) {
+                            isFinished = true;
+                            effectValue = 0;
+                        } else {
+                            effectValue = formula.apply(event.params);
+                        }
+                    }
+                    return { effect: effectValue, finished: isFinished };
+                },
+                
+                updateChart() {
+                    if (!this.state.chart) return;
+                    try {
+                        const factors = this.calculateFactors();
+                        const baseLevel = this.state.userProfile.dynamicBaseLevel;
+                        const now = new Date();
+                        const twoDaysAgo = new Date(now);
+                        twoDaysAgo.setDate(now.getDate() - 2);
+                        twoDaysAgo.setHours(0, 0, 0, 0);
+                        const startDate = twoDaysAgo.getTime();
+                        const oneDayForward = new Date(now);
+                        oneDayForward.setDate(now.getDate() + 1);
+                        const endDate = oneDayForward.getTime();
+                        const historicalPoints = [];
+                        const forecastPoints = [];
+                        const interval = 15 * 60 * 1000; 
+
+                        for (let time = startDate; time <= endDate; time += interval) {
+                            let totalEffect = 0;
+                            this.state.events.forEach(event => {
+                                totalEffect += this.getEventEffect(event, factors, time).effect;
+                            });
+                            totalEffect += this.calculateSleepDebt(time);
+                            const pointValue = Math.round(baseLevel + totalEffect);
+                            const point = { x: time, y: pointValue };
+                            if (time <= now.getTime()) {
+                                historicalPoints.push(point);
+                            } else {
+                                if (forecastPoints.length === 0 && historicalPoints.length > 0) {
+                                    forecastPoints.push(historicalPoints[historicalPoints.length - 1]);
+                                }
+                                forecastPoints.push(point);
+                            }
+                        }
+                        this.state.chart.data.datasets[0].data = historicalPoints;
+                        this.state.chart.data.datasets[1].data = forecastPoints;
+                        this.state.chart.update('none'); 
+                    } catch (t) {
+                        console.error("Error updating chart:", t);
+                    }
+                },
+                
+                attachEventListeners(){this.ui.profileForm.addEventListener("submit",t=>this.saveProfile(t)),this.ui.editProfileBtn.addEventListener("click",()=>this.ui.profileSetup.classList.remove("hidden")),document.querySelectorAll(".event-btn").forEach(t=>t.addEventListener("click",()=>this.openEventModal(t.dataset.event))),this.ui.eventForm.addEventListener("submit",t=>this.handleEventSubmit(t)),this.ui.cancelEventBtn.addEventListener("click",()=>this.closeEventModal()),this.ui.sensacionSlider.addEventListener("input",t=>{this.ui.sensacionValue.textContent=t.target.value}),this.ui.addSensacionBtn.addEventListener("click",()=>{const t=parseFloat(this.ui.sensacionSlider.value);this.addEvent("sensacion",{cantidad:t},new Date),this.ui.sensacionSlider.value=5,this.ui.sensacionValue.textContent="5"}),this.ui.analyzeGeminiBtn.addEventListener("click",()=>this.handleGeminiAnalysis()),this.ui.closeGeminiBtn.addEventListener("click",()=>{this.ui.geminiModal.classList.add("hidden"),this.ui.geminiModal.classList.remove("flex")})}
+            };
+
+            App.init();
+        });
+    </script>
+</body>
+</html>
+
